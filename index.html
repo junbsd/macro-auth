@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>기기 승인 관리</title>
+<style>
+  :root {
+    --ink: #1c1c1c;
+    --paper: #f7f6f3;
+    --line: #dddad3;
+    --ok: #2f6d4f;
+    --ok-bg: #e6f0ea;
+    --wait: #a15c00;
+    --wait-bg: #fbead0;
+    --off: #8b8681;
+    --off-bg: #efece7;
+    --danger: #a5342b;
+    --accent: #2b4a63;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  header h1 {
+    font-size: 18px;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  header .sub {
+    font-size: 12px;
+    color: #79746c;
+    margin-top: 2px;
+  }
+  #authArea { display: flex; align-items: center; gap: 10px; }
+  button {
+    font: inherit;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .btn-signin { background: var(--accent); color: white; }
+  .btn-signout { background: transparent; color: #79746c; text-decoration: underline; padding: 4px; }
+  .btn-approve { background: var(--ok); color: white; }
+  .btn-revoke { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+  .btn-deny { background: transparent; color: var(--off); border: 1px solid var(--off); }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 20px; }
+
+  #gate {
+    text-align: center;
+    padding: 80px 20px;
+    color: #79746c;
+  }
+
+  .device-card {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .device-info { flex: 1; min-width: 200px; }
+  .device-host { font-size: 15px; font-weight: 600; }
+  .device-id { font-size: 11px; color: #a19c93; font-family: ui-monospace, monospace; margin-top: 2px; }
+  .device-meta { font-size: 12px; color: #79746c; margin-top: 6px; }
+  .device-note { font-size: 12px; color: var(--accent); margin-top: 4px; font-style: italic; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .badge-online { background: var(--ok-bg); color: var(--ok); }
+  .badge-online .badge-dot { background: var(--ok); }
+  .badge-offline { background: var(--off-bg); color: var(--off); }
+  .badge-offline .badge-dot { background: var(--off); }
+  .badge-pending { background: var(--wait-bg); color: var(--wait); }
+  .badge-pending .badge-dot { background: var(--wait); }
+
+  .actions { display: flex; gap: 8px; align-items: center; }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #79746c;
+    margin: 28px 0 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .empty {
+    color: #a19c93;
+    font-size: 13px;
+    padding: 20px 0;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>기기 승인 관리</h1>
+    <div class="sub">뚫어줄게 매크로 · 실행 기기 승인/현황</div>
+  </div>
+  <div id="authArea"></div>
+</header>
+
+<main>
+  <div id="gate"></div>
+  <div id="app" style="display:none;">
+    <div class="section-title">승인 대기</div>
+    <div id="pendingList"></div>
+
+    <div class="section-title">승인됨</div>
+    <div id="approvedList"></div>
+  </div>
+</main>
+
+<!--
+  사용 전 설정할 것 (3곳):
+  1. 아래 firebaseConfig를 본인 Firebase 프로젝트 설정 값으로 교체
+  2. ADMIN_EMAIL을 관리자 본인 구글 이메일로 교체 (firestore.rules의 이메일과 동일해야 함)
+  3. Firebase 콘솔 > Authentication > Sign-in method에서 Google 로그인 활성화
+-->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+  import {
+    getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+  import {
+    getFirestore, collection, onSnapshot, doc, updateDoc, deleteDoc
+  } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+  // ── 1) 여기를 본인 Firebase 프로젝트 설정으로 교체하세요 ──
+  const firebaseConfig = {
+    apiKey: "AIzaSyCgHyXMHokjnN0o04VV6U_YB7QH7O36jwM",
+    authDomain: "macro-auth.firebaseapp.com",
+    projectId: "macro-auth",
+  };
+
+  // ── 2) 관리자 본인 구글 이메일 (firestore.rules와 반드시 동일해야 함) ──
+  const ADMIN_EMAIL = "junbsd@gmail.com";
+
+  const ONLINE_THRESHOLD_MS = 2 * 60 * 1000; // 마지막 하트비트가 이 시간 이내면 "사용중"
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+  const authArea = document.getElementById("authArea");
+  const gate = document.getElementById("gate");
+  const appEl = document.getElementById("app");
+  const pendingList = document.getElementById("pendingList");
+  const approvedList = document.getElementById("approvedList");
+
+  let unsubscribeSnapshot = null;
+
+  function renderSignedOut() {
+    authArea.innerHTML = "";
+    const btn = document.createElement("button");
+    btn.className = "btn-signin";
+    btn.textContent = "구글로 로그인";
+    btn.onclick = () => signInWithPopup(auth, provider).catch(err => alert("로그인 실패: " + err.message));
+    authArea.appendChild(btn);
+
+    gate.style.display = "block";
+    gate.textContent = "로그인 후 관리 화면을 볼 수 있습니다.";
+    appEl.style.display = "none";
+    if (unsubscribeSnapshot) { unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+  }
+
+  function renderWrongAccount(email) {
+    authArea.innerHTML = "";
+    const info = document.createElement("span");
+    info.style.fontSize = "13px";
+    info.style.color = "#79746c";
+    info.textContent = email;
+    const btn = document.createElement("button");
+    btn.className = "btn-signout";
+    btn.textContent = "로그아웃";
+    btn.onclick = () => signOut(auth);
+    authArea.appendChild(info);
+    authArea.appendChild(btn);
+
+    gate.style.display = "block";
+    gate.textContent = "이 계정(" + email + ")은 관리자 권한이 없습니다.";
+    appEl.style.display = "none";
+    if (unsubscribeSnapshot) { unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+  }
+
+  function renderSignedIn(user) {
+    authArea.innerHTML = "";
+    const info = document.createElement("span");
+    info.style.fontSize = "13px";
+    info.style.color = "#79746c";
+    info.textContent = user.email;
+    const btn = document.createElement("button");
+    btn.className = "btn-signout";
+    btn.textContent = "로그아웃";
+    btn.onclick = () => signOut(auth);
+    authArea.appendChild(info);
+    authArea.appendChild(btn);
+
+    gate.style.display = "none";
+    appEl.style.display = "block";
+    watchDevices();
+  }
+
+  function timeAgoLabel(iso) {
+    if (!iso) return "기록 없음";
+    const then = new Date(iso).getTime();
+    const diffMs = Date.now() - then;
+    if (diffMs < 0) return "방금 전";
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "방금 전";
+    if (mins < 60) return mins + "분 전";
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + "시간 전";
+    return Math.floor(hrs / 24) + "일 전";
+  }
+
+  function isOnline(lastSeenIso) {
+    if (!lastSeenIso) return false;
+    return (Date.now() - new Date(lastSeenIso).getTime()) < ONLINE_THRESHOLD_MS;
+  }
+
+  function statusBadge(deviceData) {
+    if (!deviceData.approved) {
+      const b = document.createElement("span");
+      b.className = "badge badge-pending";
+      b.innerHTML = '<span class="badge-dot"></span>승인 대기';
+      return b;
+    }
+    const online = isOnline(deviceData.last_seen);
+    const b = document.createElement("span");
+    b.className = "badge " + (online ? "badge-online" : "badge-offline");
+    b.innerHTML = '<span class="badge-dot"></span>' + (online ? "사용중" : "꺼짐");
+    return b;
+  }
+
+  function buildCard(deviceId, data) {
+    const card = document.createElement("div");
+    card.className = "device-card";
+
+    const info = document.createElement("div");
+    info.className = "device-info";
+    const host = document.createElement("div");
+    host.className = "device-host";
+    host.textContent = data.display_name || data.hostname || "(이름 없음)";
+    const idEl = document.createElement("div");
+    idEl.className = "device-id";
+    idEl.textContent = deviceId
+      + (data.display_name && data.hostname ? "  ·  원래 이름: " + data.hostname : "");
+    const meta = document.createElement("div");
+    meta.className = "device-meta";
+    meta.textContent = data.approved
+      ? "마지막 접속: " + timeAgoLabel(data.last_seen)
+        + (data.approved_by ? " · 승인자: " + data.approved_by : "")
+      : "요청 시각: " + timeAgoLabel(data.requested_at);
+    info.appendChild(host);
+    info.appendChild(idEl);
+    info.appendChild(meta);
+    if (data.note) {
+      const noteEl = document.createElement("div");
+      noteEl.className = "device-note";
+      noteEl.textContent = "메모: " + data.note;
+      info.appendChild(noteEl);
+    }
+
+    const right = document.createElement("div");
+    right.className = "actions";
+    right.appendChild(statusBadge(data));
+
+    const actionsBtns = document.createElement("div");
+    actionsBtns.className = "actions";
+
+    const editBtn = document.createElement("button");
+    editBtn.className = "btn-deny";
+    editBtn.textContent = "수정";
+    editBtn.onclick = () => {
+      const newName = prompt("표시 이름 (알아보기 쉬운 이름으로)", data.display_name || data.hostname || "");
+      if (newName === null) return; // 취소
+      const newNote = prompt("메모 (예: 사용자, 부서, 승인/취소 사유 등)", data.note || "");
+      if (newNote === null) return; // 취소
+      updateDoc(doc(db, "devices", deviceId), {
+        display_name: newName.trim(),
+        note: newNote.trim(),
+      });
+    };
+    actionsBtns.appendChild(editBtn);
+
+    if (!data.approved) {
+      const approveBtn = document.createElement("button");
+      approveBtn.className = "btn-approve";
+      approveBtn.textContent = "승인";
+      approveBtn.onclick = () => updateDoc(doc(db, "devices", deviceId), {
+        approved: true,
+        approved_at: new Date().toISOString(),
+        approved_by: auth.currentUser.email,
+      });
+      const denyBtn = document.createElement("button");
+      denyBtn.className = "btn-deny";
+      denyBtn.textContent = "삭제";
+      denyBtn.onclick = () => { if (confirm("이 요청을 삭제할까요?")) deleteDoc(doc(db, "devices", deviceId)); };
+      actionsBtns.appendChild(approveBtn);
+      actionsBtns.appendChild(denyBtn);
+    } else {
+      const revokeBtn = document.createElement("button");
+      revokeBtn.className = "btn-revoke";
+      revokeBtn.textContent = "승인 취소";
+      revokeBtn.onclick = () => {
+        if (confirm("승인을 취소할까요? (실행 중이면 최대 1분 내 자동으로 멈춥니다)")) {
+          updateDoc(doc(db, "devices", deviceId), {
+            approved: false,
+            revoked_at: new Date().toISOString(),
+            revoked_by: auth.currentUser.email,
+          });
+        }
+      };
+      actionsBtns.appendChild(revokeBtn);
+    }
+    right.appendChild(actionsBtns);
+    card.appendChild(info);
+    card.appendChild(right);
+    return card;
+  }
+
+  function watchDevices() {
+    if (unsubscribeSnapshot) unsubscribeSnapshot();
+    unsubscribeSnapshot = onSnapshot(collection(db, "devices"), (snapshot) => {
+      const pending = [];
+      const approved = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        (data.approved ? approved : pending).push([d.id, data]);
+      });
+
+      pendingList.innerHTML = "";
+      if (pending.length === 0) {
+        pendingList.innerHTML = '<div class="empty">대기 중인 요청이 없습니다.</div>';
+      } else {
+        pending.forEach(([id, data]) => pendingList.appendChild(buildCard(id, data)));
+      }
+
+      approvedList.innerHTML = "";
+      if (approved.length === 0) {
+        approvedList.innerHTML = '<div class="empty">승인된 기기가 없습니다.</div>';
+      } else {
+        // 사용중인 기기를 위로 정렬
+        approved.sort((a, b) => isOnline(b[1].last_seen) - isOnline(a[1].last_seen));
+        approved.forEach(([id, data]) => approvedList.appendChild(buildCard(id, data)));
+      }
+    }, (err) => {
+      pendingList.innerHTML = '<div class="empty">읽기 오류: ' + err.message + '</div>';
+    });
+  }
+
+  onAuthStateChanged(auth, (user) => {
+    if (!user) { renderSignedOut(); return; }
+    if (user.email !== ADMIN_EMAIL) { renderWrongAccount(user.email); return; }
+    renderSignedIn(user);
+  });
+
+  // 온라인/오프라인 배지가 시간 경과에 따라 갱신되도록 주기적으로 다시 그림
+  setInterval(() => { if (auth.currentUser && auth.currentUser.email === ADMIN_EMAIL) watchDevices(); }, 30000);
+</script>
+</body>
+</html>
