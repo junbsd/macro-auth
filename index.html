@@ -160,13 +160,13 @@
 
   // ── 1) 여기를 본인 Firebase 프로젝트 설정으로 교체하세요 ──
   const firebaseConfig = {
-    apiKey: "AIzaSyCgHyXMHokjnN0o04VV6U_YB7QH7O36jwM",
-    authDomain: "macro-auth.firebaseapp.com",
-    projectId: "macro-auth",
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
   };
 
   // ── 2) 관리자 본인 구글 이메일 (firestore.rules와 반드시 동일해야 함) ──
-  const ADMIN_EMAIL = "junbsd@gmail.com";
+  const ADMIN_EMAIL = "여기에-관리자-구글-이메일@gmail.com";
 
   const ONLINE_THRESHOLD_MS = 2 * 60 * 1000; // 마지막 하트비트가 이 시간 이내면 "사용중"
 
@@ -333,6 +333,12 @@
       actionsBtns.appendChild(approveBtn);
       actionsBtns.appendChild(denyBtn);
     } else {
+      const monitorBtn = document.createElement("button");
+      monitorBtn.className = "btn-approve";
+      monitorBtn.textContent = "모니터링";
+      monitorBtn.onclick = () => {
+        window.location.href = "monitor.html?device=" + encodeURIComponent(deviceId);
+      };
       const revokeBtn = document.createElement("button");
       revokeBtn.className = "btn-revoke";
       revokeBtn.textContent = "승인 취소";
@@ -345,6 +351,7 @@
           });
         }
       };
+      actionsBtns.appendChild(monitorBtn);
       actionsBtns.appendChild(revokeBtn);
     }
     right.appendChild(actionsBtns);
