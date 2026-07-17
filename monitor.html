@@ -251,7 +251,45 @@
   const prepareBtn = document.getElementById("prepareBtn");
   const logBox = document.getElementById("logBox");
 
-  signinBtn.onclick = () => signInWithPopup(auth, provider).catch(err => alert("로그인 실패: " + err.message));
+  signinBtn.onclick = () => {
+    ensureAudioUnlocked();
+    signInWithPopup(auth, provider).catch(err => alert("로그인 실패: " + err.message));
+  };
+
+  // ── 전송완료 알림음 (방법 A: 이 페이지가 화면에 떠 있을 때만 울림) ──
+  // 별도 음원 파일 없이 Web Audio API로 그때그때 소리를 직접 만들어서
+  // 재생한다(파일 호스팅/네트워크 요청 불필요). 아이폰 사파리는 사용자가
+  // 화면을 한 번이라도 터치하기 전엔 소리 재생 자체를 막아두므로, 버튼을
+  // 누르는 시점에 미리 "잠금 해제"를 해둔다 - 이미 있는 버튼 클릭에
+  // 자연스럽게 끼워넣어서 별도 동작을 요구하지 않는다.
+  let audioCtx = null;
+  function ensureAudioUnlocked() {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audioCtx = new Ctx();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
+  function playAlertSound() {
+    if (!audioCtx || audioCtx.state !== "running") return;
+    const now = audioCtx.currentTime;
+    const step = 0.16;
+    [880, 1320].forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + i * step);
+      gain.gain.exponentialRampToValueAtTime(0.35, now + i * step + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + (i + 1) * step);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now + i * step);
+      osc.stop(now + (i + 1) * step + 0.02);
+    });
+  }
+  let lastPlayedLog = null; // 같은 로그로 소리가 중복 재생되지 않게(스냅샷이 다른 이유로도 여러 번 옴)
 
   if (!deviceId) {
     document.body.innerHTML = '<div style="padding:40px;text-align:center;color:#79746c;">기기가 지정되지 않았습니다.<br>관리 화면에서 [모니터링] 버튼으로 접속해주세요.</div>';
@@ -346,10 +384,21 @@
       const line = document.createElement("div");
       line.textContent = data.last_log;
       logBox.appendChild(line);
+
+      // [소리 알림] "전송완료"가 포함된 새 로그일 때만 울림(원격제어/메시지입력
+      // 결과 같은 다른 로그들은 소리 없이 화면 표시만). 같은 로그 내용으로
+      // 스냅샷이 여러 번 와도(다른 필드 변경 등) 한 번만 울리게 lastPlayedLog로 방지.
+      if (data.last_log !== lastPlayedLog && data.last_log.includes("[전송완료]")) {
+        lastPlayedLog = data.last_log;
+        playAlertSound();
+      } else if (data.last_log !== lastPlayedLog) {
+        lastPlayedLog = data.last_log; // 전송완료가 아니어도 "이미 본 로그"로는 기록
+      }
     }
   }
 
   prepareBtn.onclick = async () => {
+    ensureAudioUnlocked();
     pendingPrepare = true;
     pendingPrepareSince = Date.now();
     prepareBtn.disabled = true;
@@ -366,6 +415,7 @@
   };
 
   toggleBtn.onclick = async () => {
+    ensureAudioUnlocked();
     const wantStart = toggleBtn.className === "start";
     pendingCommand = true;
     pendingWantRunning = wantStart;
