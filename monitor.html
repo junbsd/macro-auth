@@ -130,11 +130,15 @@
   #toggleBtn.stop:active { background: var(--stop-red-dark); }
   #toggleBtn:disabled { opacity: 0.6; }
 
-  #prepareBtn {
+  .secondary-row {
     flex-shrink: 0;
-    width: 100%;
-    height: 48px;
+    display: flex;
+    gap: 8px;
     margin-top: 10px;
+  }
+  .secondary-btn {
+    flex: 1;
+    height: 48px;
     border: 1px solid var(--line);
     border-radius: 12px;
     background: white;
@@ -142,8 +146,8 @@
     font-size: 15px;
     font-weight: 600;
   }
-  #prepareBtn:disabled { opacity: 0.4; }
-  #prepareBtn:not(:disabled):active { background: var(--paper); }
+  .secondary-btn:disabled { opacity: 0.4; }
+  .secondary-btn:not(:disabled):active { background: var(--paper); }
 
   .log-wrap {
     flex: 1;
@@ -196,7 +200,10 @@
   </div>
 
   <button id="toggleBtn" class="start" disabled>감지시작</button>
-  <button id="prepareBtn" disabled>메시지입력</button>
+  <div class="secondary-row">
+    <button id="prepareBtn" class="secondary-btn" disabled>메시지입력</button>
+    <button id="clearBtn" class="secondary-btn" disabled>메시지삭제</button>
+  </div>
 
   <div class="log-wrap">
     <div class="label">로그</div>
@@ -224,7 +231,7 @@
   const firebaseConfig = {
     apiKey: "AIzaSyCgHyXMHokjnN0o04VV6U_YB7QH7O36jwM",
     authDomain: "junbsd.firebaseapp.com",
-    projectId: "macro-auth",
+    projectId: "marc-auth",
   };
 
   // ── 2) 관리자 본인 구글 이메일 (firestore.rules와 반드시 동일해야 함) ──
@@ -249,6 +256,7 @@
   const roomChips = document.getElementById("roomChips");
   const toggleBtn = document.getElementById("toggleBtn");
   const prepareBtn = document.getElementById("prepareBtn");
+  const clearBtn = document.getElementById("clearBtn");
   const logBox = document.getElementById("logBox");
 
   signinBtn.onclick = () => {
@@ -300,6 +308,8 @@
   let pendingWantRunning = null; // 클릭했을 때 내가 원하던 방향(true=시작 원함, false=중지 원함)
   let pendingPrepare = false;
   let pendingPrepareSince = 0; // 클릭 시각(ms) - 타임아웃 판단용
+  let pendingClear = false;
+  let pendingClearSince = 0;
 
   function isOnline(lastSeenIso) {
     if (!lastSeenIso) return false;
@@ -379,6 +389,26 @@
       prepareBtn.textContent = "메시지입력";
     }
 
+    // [메시지삭제] 메시지입력과 완전히 동일한 원칙(감시 중/오프라인이면
+    // 사용 불가, 로그 도착 또는 20초 타임아웃으로 "처리 중" 자동 해제).
+    if (pendingClear) {
+      const logArrived = data.last_log_at && new Date(data.last_log_at).getTime() > pendingClearSince;
+      const timedOut = Date.now() - pendingClearSince > 20000;
+      if (logArrived || timedOut) {
+        pendingClear = false;
+      }
+    }
+    if (!online || running) {
+      clearBtn.disabled = true;
+      clearBtn.textContent = "메시지삭제";
+    } else if (pendingClear) {
+      clearBtn.disabled = true;
+      clearBtn.textContent = "삭제 중... (로그 확인)";
+    } else {
+      clearBtn.disabled = false;
+      clearBtn.textContent = "메시지삭제";
+    }
+
     if (data.last_log) {
       logBox.innerHTML = "";
       const line = document.createElement("div");
@@ -411,6 +441,23 @@
     } catch (err) {
       alert("명령 전송 실패: " + err.message);
       pendingPrepare = false;
+    }
+  };
+
+  clearBtn.onclick = async () => {
+    ensureAudioUnlocked();
+    pendingClear = true;
+    pendingClearSince = Date.now();
+    clearBtn.disabled = true;
+    clearBtn.textContent = "삭제 중... (로그 확인)";
+    try {
+      await updateDoc(doc(db, "devices", deviceId), {
+        command: "clear_message",
+        command_issued_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      alert("명령 전송 실패: " + err.message);
+      pendingClear = false;
     }
   };
 
