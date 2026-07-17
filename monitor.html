@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>감시 모니터</title>
+<style>
+  :root {
+    --ink: #1c1c1c;
+    --paper: #f7f6f3;
+    --line: #dddad3;
+    --ok: #2f6d4f;
+    --ok-bg: #e6f0ea;
+    --off: #8b8681;
+    --off-bg: #efece7;
+    --start-green: #2e7d32;
+    --start-green-dark: #1b5e20;
+    --stop-red: #c62828;
+    --stop-red-dark: #8e0000;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+  #gate {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    text-align: center;
+    padding: 24px;
+    gap: 14px;
+  }
+  #gate button {
+    font: inherit;
+    background: #2b4a63;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 20px;
+    font-size: 15px;
+  }
+  #app {
+    display: none;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top, 16px) 16px calc(env(safe-area-inset-bottom, 16px) + 8px);
+  }
+  header {
+    padding: 8px 0 14px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  header .name {
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  header .sub {
+    font-size: 12px;
+    color: #79746c;
+    margin-top: 4px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 8px;
+  }
+  .badge-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .badge-online { background: var(--ok-bg); color: var(--ok); }
+  .badge-online .badge-dot { background: var(--ok); }
+  .badge-offline { background: var(--off-bg); color: var(--off); }
+  .badge-offline .badge-dot { background: var(--off); }
+
+  .rooms {
+    flex-shrink: 0;
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .rooms .label {
+    font-size: 11px;
+    color: #a19c93;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+  }
+  .rooms .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .room-chip {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 13px;
+  }
+  .rooms .empty { color: #a19c93; font-size: 13px; }
+
+  #toggleBtn {
+    flex-shrink: 0;
+    width: 100%;
+    height: 25vh;
+    min-height: 140px;
+    max-height: 220px;
+    border: none;
+    border-radius: 20px;
+    font-size: 26px;
+    font-weight: 700;
+    color: white;
+    letter-spacing: -0.02em;
+    transition: background-color 0.15s ease;
+  }
+  #toggleBtn.start { background: var(--start-green); }
+  #toggleBtn.start:active { background: var(--start-green-dark); }
+  #toggleBtn.stop { background: var(--stop-red); }
+  #toggleBtn.stop:active { background: var(--stop-red-dark); }
+  #toggleBtn:disabled { opacity: 0.6; }
+
+  #prepareBtn {
+    flex-shrink: 0;
+    width: 100%;
+    height: 48px;
+    margin-top: 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: white;
+    color: var(--ink);
+    font-size: 15px;
+    font-weight: 600;
+  }
+  #prepareBtn:disabled { opacity: 0.4; }
+  #prepareBtn:not(:disabled):active { background: var(--paper); }
+
+  .log-wrap {
+    flex: 1;
+    min-height: 0;
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+  }
+  .log-wrap .label {
+    font-size: 11px;
+    color: #a19c93;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+  }
+  #logBox {
+    flex: 1;
+    background: #1c1c1c;
+    color: #d7f5d7;
+    border-radius: 14px;
+    padding: 16px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-y: auto;
+    display: flex;
+    align-items: center;
+  }
+  #logBox .empty { color: #6b6b6b; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div style="font-size:15px; color:#79746c;">로그인 후 이용할 수 있습니다.</div>
+  <button id="signinBtn">구글로 로그인</button>
+</div>
+
+<div id="app">
+  <header>
+    <div class="name" id="deviceName">-</div>
+    <div class="sub" id="deviceSub"></div>
+    <div id="statusBadge"></div>
+  </header>
+
+  <div class="rooms">
+    <div class="label">감지 중인 방</div>
+    <div class="chips" id="roomChips"><span class="empty">-</span></div>
+  </div>
+
+  <button id="toggleBtn" class="start" disabled>감지시작</button>
+  <button id="prepareBtn" disabled>메시지입력</button>
+
+  <div class="log-wrap">
+    <div class="label">로그</div>
+    <div id="logBox"><span class="empty">아직 로그가 없습니다</span></div>
+  </div>
+</div>
+
+<!--
+  사용 전 설정할 것 (admin_dashboard.html과 동일하게):
+  1. firebaseConfig를 본인 Firebase 프로젝트 설정 값으로 교체
+  2. ADMIN_EMAIL을 관리자 본인 구글 이메일로 교체
+  접속 방법: 이 페이지에 ?device=기기ID 형태로 접속 (admin_dashboard.html의
+  각 기기 카드에서 [모니터링] 버튼을 누르면 자동으로 이 형태로 이동합니다).
+-->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+  import {
+    getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+  import {
+    getFirestore, doc, onSnapshot, updateDoc
+  } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+  // ── 1) 본인 Firebase 프로젝트 설정으로 교체 ──
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+  };
+
+  // ── 2) 관리자 본인 구글 이메일 (firestore.rules와 반드시 동일해야 함) ──
+  const ADMIN_EMAIL = "여기에-관리자-구글-이메일@gmail.com";
+
+  const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+
+  const params = new URLSearchParams(window.location.search);
+  const deviceId = params.get("device");
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+  const gate = document.getElementById("gate");
+  const appEl = document.getElementById("app");
+  const signinBtn = document.getElementById("signinBtn");
+  const deviceName = document.getElementById("deviceName");
+  const deviceSub = document.getElementById("deviceSub");
+  const statusBadge = document.getElementById("statusBadge");
+  const roomChips = document.getElementById("roomChips");
+  const toggleBtn = document.getElementById("toggleBtn");
+  const prepareBtn = document.getElementById("prepareBtn");
+  const logBox = document.getElementById("logBox");
+
+  signinBtn.onclick = () => signInWithPopup(auth, provider).catch(err => alert("로그인 실패: " + err.message));
+
+  if (!deviceId) {
+    document.body.innerHTML = '<div style="padding:40px;text-align:center;color:#79746c;">기기가 지정되지 않았습니다.<br>관리 화면에서 [모니터링] 버튼으로 접속해주세요.</div>';
+    throw new Error("no device id");
+  }
+
+  let pendingCommand = false; // 버튼 눌러서 명령 보낸 직후, PC가 실제로 반영할 때까지의 과도 상태
+  let pendingPrepare = false;
+  let pendingPrepareSince = "";
+
+  function isOnline(lastSeenIso) {
+    if (!lastSeenIso) return false;
+    return (Date.now() - new Date(lastSeenIso).getTime()) < ONLINE_THRESHOLD_MS;
+  }
+
+  function render(data) {
+    deviceName.textContent = data.display_name || data.hostname || deviceId;
+    deviceSub.textContent = data.display_name && data.hostname ? data.hostname : "";
+
+    const online = isOnline(data.last_seen);
+    statusBadge.innerHTML = "";
+    const b = document.createElement("span");
+    b.className = "badge " + (online ? "badge-online" : "badge-offline");
+    b.innerHTML = '<span class="badge-dot"></span>' + (online ? "PC 켜짐" : "PC 꺼짐/오프라인");
+    statusBadge.appendChild(b);
+
+    const rooms = Array.isArray(data.room_names) ? data.room_names : [];
+    roomChips.innerHTML = "";
+    if (rooms.length === 0) {
+      roomChips.innerHTML = '<span class="empty">설정된 방 없음</span>';
+    } else {
+      rooms.forEach(r => {
+        const chip = document.createElement("span");
+        chip.className = "room-chip";
+        chip.textContent = r;
+        roomChips.appendChild(chip);
+      });
+    }
+
+    const running = !!data.is_running;
+    // 방금 내가 누른 명령이 아직 PC에 반영 안 됐으면(pendingCommand) 버튼을
+    // 잠깐 비활성 상태로 유지해서 연타를 막는다. 서버 값이 내가 원하는
+    // 상태로 바뀌면 자동으로 다시 활성화된다.
+    if (!online) {
+      toggleBtn.disabled = true;
+      toggleBtn.textContent = "PC 오프라인";
+      toggleBtn.className = "start";
+    } else if (running) {
+      toggleBtn.textContent = pendingCommand ? "중지 처리 중..." : "중지";
+      toggleBtn.className = "stop";
+      toggleBtn.disabled = pendingCommand;
+    } else {
+      toggleBtn.textContent = pendingCommand ? "시작 처리 중..." : "감지시작";
+      toggleBtn.className = "start";
+      toggleBtn.disabled = pendingCommand;
+    }
+    if (pendingCommand && ((running && toggleBtn.className === "stop") || (!running && toggleBtn.className === "start"))) {
+      // 서버 상태가 아직 내가 원하는 방향으로 안 바뀜 - 계속 대기
+    } else {
+      pendingCommand = false;
+    }
+
+    // [메시지입력] 감시 중이거나 PC가 오프라인이면 사용 불가. "처리 중"일
+    // 때는 새 로그(last_log_at)가 클릭 시점보다 뒤에 도착하면 완료로 보고
+    // 다시 눌러볼 수 있게 푼다(성공/실패 여부는 로그 내용으로 확인).
+    if (pendingPrepare && data.last_log_at && data.last_log_at > pendingPrepareSince) {
+      pendingPrepare = false;
+    }
+    if (!online || running) {
+      prepareBtn.disabled = true;
+      prepareBtn.textContent = "메시지입력";
+    } else if (pendingPrepare) {
+      prepareBtn.disabled = true;
+      prepareBtn.textContent = "준비 중... (로그 확인)";
+    } else {
+      prepareBtn.disabled = false;
+      prepareBtn.textContent = "메시지입력";
+    }
+
+    if (data.last_log) {
+      logBox.innerHTML = "";
+      const line = document.createElement("div");
+      line.textContent = data.last_log;
+      logBox.appendChild(line);
+    }
+  }
+
+  prepareBtn.onclick = async () => {
+    pendingPrepare = true;
+    pendingPrepareSince = new Date().toISOString();
+    prepareBtn.disabled = true;
+    prepareBtn.textContent = "준비 중... (로그 확인)";
+    try {
+      await updateDoc(doc(db, "devices", deviceId), {
+        command: "prepare_message",
+        command_issued_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      alert("명령 전송 실패: " + err.message);
+      pendingPrepare = false;
+    }
+  };
+
+  toggleBtn.onclick = async () => {
+    const wantStart = toggleBtn.className === "start";
+    pendingCommand = true;
+    toggleBtn.disabled = true;
+    toggleBtn.textContent = wantStart ? "시작 처리 중..." : "중지 처리 중...";
+    try {
+      await updateDoc(doc(db, "devices", deviceId), {
+        command: wantStart ? "start" : "stop",
+        command_issued_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      alert("명령 전송 실패: " + err.message);
+      pendingCommand = false;
+    }
+  };
+
+  let unsubscribe = null;
+
+  function startWatching() {
+    if (unsubscribe) unsubscribe();
+    unsubscribe = onSnapshot(doc(db, "devices", deviceId), (snap) => {
+      if (!snap.exists()) {
+        document.body.innerHTML = '<div style="padding:40px;text-align:center;color:#79746c;">이 기기를 찾을 수 없습니다.</div>';
+        return;
+      }
+      render(snap.data());
+    }, (err) => {
+      logBox.textContent = "읽기 오류: " + err.message;
+    });
+  }
+
+  onAuthStateChanged(auth, (user) => {
+    if (!user) {
+      gate.style.display = "flex";
+      appEl.style.display = "none";
+      if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+      return;
+    }
+    if (user.email !== ADMIN_EMAIL) {
+      gate.innerHTML = '<div style="padding:24px;text-align:center;color:#79746c;">이 계정(' + user.email + ')은 권한이 없습니다.</div>';
+      gate.style.display = "flex";
+      appEl.style.display = "none";
+      return;
+    }
+    gate.style.display = "none";
+    appEl.style.display = "flex";
+    startWatching();
+  });
+</script>
+</body>
+</html>
