@@ -259,8 +259,9 @@
   }
 
   let pendingCommand = false; // 버튼 눌러서 명령 보낸 직후, PC가 실제로 반영할 때까지의 과도 상태
+  let pendingWantRunning = null; // 클릭했을 때 내가 원하던 방향(true=시작 원함, false=중지 원함)
   let pendingPrepare = false;
-  let pendingPrepareSince = "";
+  let pendingPrepareSince = 0; // 클릭 시각(ms) - 타임아웃 판단용
 
   function isOnline(lastSeenIso) {
     if (!lastSeenIso) return false;
@@ -292,9 +293,16 @@
     }
 
     const running = !!data.is_running;
-    // 방금 내가 누른 명령이 아직 PC에 반영 안 됐으면(pendingCommand) 버튼을
-    // 잠깐 비활성 상태로 유지해서 연타를 막는다. 서버 값이 내가 원하는
-    // 상태로 바뀌면 자동으로 다시 활성화된다.
+    // [버그 수정] 예전엔 toggleBtn.className을 running 보고 정해놓은 직후에
+    // 그 값을 다시 running과 비교해서 "아직 안 바뀜"을 판단했는데, 그 두
+    // 값이 항상 서로 일치하게 되어 있어서(둘 다 같은 running에서 나옴)
+    // 조건이 사실상 항상 참이 되어 "처리 중..."이 절대 안 풀리는 문제가
+    // 있었다(실측 확인). 이제 "클릭했을 때 내가 원했던 방향"을 별도로
+    // 저장해두고, 실제 서버 상태(running)가 그 방향과 같아지면 그때
+    // 정확히 pendingCommand를 해제한다.
+    if (pendingCommand && running === pendingWantRunning) {
+      pendingCommand = false;
+    }
     if (!online) {
       toggleBtn.disabled = true;
       toggleBtn.textContent = "PC 오프라인";
@@ -308,17 +316,19 @@
       toggleBtn.className = "start";
       toggleBtn.disabled = pendingCommand;
     }
-    if (pendingCommand && ((running && toggleBtn.className === "stop") || (!running && toggleBtn.className === "start"))) {
-      // 서버 상태가 아직 내가 원하는 방향으로 안 바뀜 - 계속 대기
-    } else {
-      pendingCommand = false;
-    }
 
     // [메시지입력] 감시 중이거나 PC가 오프라인이면 사용 불가. "처리 중"일
-    // 때는 새 로그(last_log_at)가 클릭 시점보다 뒤에 도착하면 완료로 보고
-    // 다시 눌러볼 수 있게 푼다(성공/실패 여부는 로그 내용으로 확인).
-    if (pendingPrepare && data.last_log_at && data.last_log_at > pendingPrepareSince) {
-      pendingPrepare = false;
+    // 때는 새 로그가 클릭 시점보다 뒤에 도착하거나, 일정 시간(20초)이
+    // 지나면 안전장치로 자동으로 풀어서 다시 눌러볼 수 있게 한다(메시지입력은
+    // start/stop과 달리 "원하는 최종 상태"가 없는 1회성 동작이라 로그 도착
+    // 여부만으로는 놓치는 경우- 예: last_log가 클릭 직후와 우연히 같은
+    // 타이밍에 갱신 - 를 대비한 이중 안전장치).
+    if (pendingPrepare) {
+      const logArrived = data.last_log_at && new Date(data.last_log_at).getTime() > pendingPrepareSince;
+      const timedOut = Date.now() - pendingPrepareSince > 20000;
+      if (logArrived || timedOut) {
+        pendingPrepare = false;
+      }
     }
     if (!online || running) {
       prepareBtn.disabled = true;
@@ -341,7 +351,7 @@
 
   prepareBtn.onclick = async () => {
     pendingPrepare = true;
-    pendingPrepareSince = new Date().toISOString();
+    pendingPrepareSince = Date.now();
     prepareBtn.disabled = true;
     prepareBtn.textContent = "준비 중... (로그 확인)";
     try {
@@ -358,6 +368,7 @@
   toggleBtn.onclick = async () => {
     const wantStart = toggleBtn.className === "start";
     pendingCommand = true;
+    pendingWantRunning = wantStart;
     toggleBtn.disabled = true;
     toggleBtn.textContent = wantStart ? "시작 처리 중..." : "중지 처리 중...";
     try {
